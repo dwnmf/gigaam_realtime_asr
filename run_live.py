@@ -183,10 +183,10 @@ def run_continuous_mode(asr: RealtimeASR, device_id, output_file, accumulate: bo
         
         # Бесконечный цикл ожидания
         while True:
-            # Периодически обновляем уровень звука
+            # Периодически обновляем уровень звука (100мс для плавности без мерцания)
             level = asr.get_audio_level()
             ui.update(level=level, recording=True)
-            threading.Event().wait(0.05)
+            threading.Event().wait(0.1)
             
     except KeyboardInterrupt:
         pass
@@ -308,10 +308,9 @@ def run_push_to_talk_mode(asr: RealtimeASR, device_id, output_file, ptt_key: str
                     # Копируем в буфер обмена
                     copied = copy_to_clipboard(text)
                     
-                    # Останавливаем Live для вывода сегмента
-                    ui.stop_live_display()
-                    ui.print_segment(text, copied=copied)
-                    ui.start_live_display()
+                    # Обновляем текст в UI вместо перезапуска Live (без мерцания)
+                    status_text = f"📋 Скопировано!" if copied else ""
+                    ui.update(text=f"{text} {status_text}", recording=False)
                     
                     # Записываем в файл
                     if output_file:
@@ -319,7 +318,7 @@ def run_push_to_talk_mode(asr: RealtimeASR, device_id, output_file, ptt_key: str
                         output_file.write(f"[{timestamp}] {text}\n")
                         output_file.flush()
             
-            threading.Event().wait(0.05)  # 50ms polling
+            threading.Event().wait(0.1)  # Увеличено до 100мс для стабильности
             
     except KeyboardInterrupt:
         pass

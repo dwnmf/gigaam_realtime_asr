@@ -143,7 +143,8 @@ class RichConsoleUI:
         if not RICH_AVAILABLE:
             raise ImportError("Rich library is required. Install: pip install rich")
         
-        self.console = Console()
+        # Консоль с отключением очистки для уменьшения мерцания
+        self.console = Console(highlight=False, force_terminal=True)
         self.show_timestamps = show_timestamps
         self.show_level = show_level
         
@@ -151,6 +152,8 @@ class RichConsoleUI:
         self.is_recording = False
         self.is_paused = False
         self.audio_level = 0.0
+        self._smoothed_level = 0.0  # Сглаженный уровень для анимации
+        self._level_smoothing = 0.3  # Коэффициент сглаживания (0-1, меньше = плавнее)
         self.current_text = ""
         self.accumulated_text = ""
         self.segments: List[Tuple[str, str]] = []  # (timestamp, text)
@@ -161,6 +164,7 @@ class RichConsoleUI:
         self._live: Optional[Live] = None
         self._stop_event = threading.Event()
         self._update_thread: Optional[threading.Thread] = None
+        self._pending_update = False  # Флаг для batch-обновлений
     
     def print_banner(self):
         """Выводит приветственный баннер."""
@@ -291,8 +295,9 @@ class RichConsoleUI:
         self._live = Live(
             self._generate_display(),
             console=self.console,
-            refresh_per_second=15,
-            transient=False
+            refresh_per_second=10,  # Уменьшено для стабильности
+            transient=True,  # Не оставляет след после остановки
+            vertical_overflow="visible",  # Предотвращает обрезку
         )
         self._live.start()
     
@@ -311,19 +316,39 @@ class RichConsoleUI:
         paused: Optional[bool] = None,
         accumulated: Optional[str] = None
     ):
-        """Обновляет отображение."""
-        if text is not None:
-            self.current_text = text
-        if level is not None:
-            self.audio_level = min(1.0, max(0.0, level))
-        if recording is not None:
-            self.is_recording = recording
-        if paused is not None:
-            self.is_paused = paused
-        if accumulated is not None:
-            self.accumulated_text = accumulated
+        """Обновляет отображение с минимальным мерцанием."""
+        changed = False
         
-        if self._live:
+        if text is not None and text != self.current_text:
+            self.current_text = text
+            changed = True
+        
+        if level is not None:
+            # Экспоненциальное сглаживание для плавной анимации
+            new_level = min(1.0, max(0.0, level))
+            self._smoothed_level = (
+                self._level_smoothing * new_level + 
+                (1 - self._level_smoothing) * self._smoothed_level
+            )
+            # Обновляем только если изменение значительное (>2%)
+            if abs(self._smoothed_level - self.audio_level) > 0.02:
+                self.audio_level = self._smoothed_level
+                changed = True
+        
+        if recording is not None and recording != self.is_recording:
+            self.is_recording = recording
+            changed = True
+        
+        if paused is not None and paused != self.is_paused:
+            self.is_paused = paused
+            changed = True
+        
+        if accumulated is not None and accumulated != self.accumulated_text:
+            self.accumulated_text = accumulated
+            changed = True
+        
+        # Обновляем Live только при реальных изменениях
+        if self._live and changed:
             self._live.update(self._generate_display())
     
     def add_segment(self, text: str):
