@@ -33,7 +33,7 @@ def __getattr__(name):
     """Ленивый импорт GUI компонентов."""
     # GUI виджеты
     if name in ('VUMeter', 'TranscriptionWidget', 'StatusIndicator', 
-                'DeviceComboBox', 'RecordButton'):
+                'DeviceComboBox', 'RecordButton', 'ActionButton', 'Colors'):
         if _check_pyqt6():
             from . import widgets
             return getattr(widgets, name)

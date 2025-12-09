@@ -23,16 +23,18 @@ def check_dependencies(skip_model_check: bool = False) -> bool:
     """Проверяет наличие необходимых зависимостей."""
     missing = []
     
+    # ВАЖНО: Проверяем onnx_asr ПЕРВЫМ, до PyQt6, иначе DLL конфликт
+    if not skip_model_check:
+        try:
+            import onnx_asr
+        except Exception as e:
+            print(f"⚠️ onnx_asr import error: {e}")
+            missing.append("onnx_asr")
+    
     try:
         import PyQt6
     except ImportError:
         missing.append("PyQt6")
-    
-    if not skip_model_check:
-        try:
-            import onnx_asr
-        except ImportError:
-            missing.append("onnx_asr")
     
     try:
         import sounddevice

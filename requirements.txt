@@ -1,7 +1,7 @@
 # GigaAM Realtime ASR Dependencies
 
 # Основные зависимости
-onnx_asr>=0.1.0
+onnx-asr>=0.1.0
 sounddevice>=0.4.6
 numpy>=1.21.0
 

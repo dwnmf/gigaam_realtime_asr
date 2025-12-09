@@ -1,11 +1,8 @@
 """
-GigaAM Custom PyQt6 Widgets
+GigaAM Custom PyQt6 Widgets — Minimal Professional Design
 
-Кастомные виджеты для GUI приложения:
-- VUMeter: Индикатор уровня звука с градиентом
-- TranscriptionWidget: Область отображения транскрипции
-- StatusBar: Панель статуса с иконками
-- DeviceComboBox: Выпадающий список устройств
+Кастомные виджеты для GUI приложения.
+Минималистичный, строгий дизайн без лишних украшений.
 """
 
 from typing import Optional, List, Tuple
@@ -17,7 +14,7 @@ try:
         QPushButton, QTextEdit, QComboBox, QFrame,
         QScrollArea, QSizePolicy, QGroupBox, QProgressBar
     )
-    from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QSize, QPropertyAnimation, QEasingCurve
+    from PyQt6.QtCore import Qt, QTimer, pyqtSignal, pyqtProperty, QSize, QPropertyAnimation, QEasingCurve
     from PyQt6.QtGui import (
         QPainter, QColor, QLinearGradient, QPen, QBrush,
         QFont, QPalette, QFontDatabase
@@ -27,41 +24,67 @@ except ImportError:
     PYQT6_AVAILABLE = False
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# ЦВЕТОВАЯ ПАЛИТРА — Строгая, профессиональная
+# ═══════════════════════════════════════════════════════════════════════════
+
+class Colors:
+    """Централизованная цветовая схема."""
+    # Фоны
+    BG_DARK = "#0d0d0d"
+    BG_PRIMARY = "#141414"
+    BG_SECONDARY = "#1a1a1a"
+    BG_ELEVATED = "#1f1f1f"
+    BG_SURFACE = "#252525"
+    
+    # Границы
+    BORDER = "#2a2a2a"
+    BORDER_SUBTLE = "#1f1f1f"
+    
+    # Текст
+    TEXT_PRIMARY = "#e8e8e8"
+    TEXT_SECONDARY = "#888888"
+    TEXT_MUTED = "#555555"
+    
+    # Акценты
+    ACCENT = "#3b82f6"          # Синий
+    ACCENT_HOVER = "#60a5fa"
+    ACCENT_ACTIVE = "#2563eb"
+    
+    # Состояния
+    SUCCESS = "#22c55e"
+    WARNING = "#eab308"
+    DANGER = "#ef4444"
+    
+    # Специальные
+    RECORDING = "#dc2626"
+    RECORDING_GLOW = "#7f1d1d"
+
+
 if PYQT6_AVAILABLE:
 
     class VUMeter(QWidget):
         """
-        Визуальный индикатор уровня звука с градиентом.
+        Минималистичный индикатор уровня звука.
         
-        Цвета: зелёный (тихо) -> жёлтый (норма) -> красный (громко)
+        Простая полоса с градиентом от синего к красному.
         """
         
         def __init__(self, parent=None, orientation=Qt.Orientation.Horizontal):
             super().__init__(parent)
-            self._level = 0.0  # 0.0 - 1.0
+            self._level = 0.0
             self._peak = 0.0
-            self._peak_hold_time = 30  # frames
+            self._peak_hold_time = 30
             self._peak_counter = 0
             self._orientation = orientation
             
-            # Размеры
             if orientation == Qt.Orientation.Horizontal:
-                self.setMinimumSize(200, 24)
-                self.setMaximumHeight(32)
+                self.setMinimumSize(200, 6)
+                self.setMaximumHeight(8)
             else:
-                self.setMinimumSize(24, 100)
-                self.setMaximumWidth(32)
+                self.setMinimumSize(6, 100)
+                self.setMaximumWidth(8)
             
-            # Цвета градиента
-            self._color_low = QColor(0, 255, 0)     # Зелёный
-            self._color_mid = QColor(255, 255, 0)   # Жёлтый  
-            self._color_high = QColor(255, 0, 0)    # Красный
-            
-            # Фон
-            self._bg_color = QColor(40, 40, 40)
-            self._border_color = QColor(80, 80, 80)
-            
-            # Анимация
             self._animation = QPropertyAnimation(self, b"level")
             self._animation.setDuration(50)
             self._animation.setEasingCurve(QEasingCurve.Type.OutQuad)
@@ -70,43 +93,44 @@ if PYQT6_AVAILABLE:
             return self._level
         
         def set_level(self, value: float):
-            """Устанавливает уровень (0.0 - 1.0)."""
             value = max(0.0, min(1.0, value))
             self._level = value
             
-            # Обновляем пик
             if value > self._peak:
                 self._peak = value
                 self._peak_counter = 0
             else:
                 self._peak_counter += 1
                 if self._peak_counter > self._peak_hold_time:
-                    self._peak = max(0, self._peak - 0.02)
+                    self._peak = max(0, self._peak - 0.03)
             
             self.update()
         
-        level = property(get_level, set_level)
+        level = pyqtProperty(float, fget=get_level, fset=set_level)
         
         def paintEvent(self, event):
             painter = QPainter(self)
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
             
-            rect = self.rect().adjusted(1, 1, -1, -1)
+            rect = self.rect()
             
-            # Фон
-            painter.fillRect(rect, self._bg_color)
+            # Фон — тёмная полоса
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(Colors.BG_DARK))
+            painter.drawRoundedRect(rect, 2, 2)
             
-            # Градиент
+            # Градиент заполнения
             if self._orientation == Qt.Orientation.Horizontal:
                 gradient = QLinearGradient(0, 0, rect.width(), 0)
             else:
                 gradient = QLinearGradient(0, rect.height(), 0, 0)
             
-            gradient.setColorAt(0.0, self._color_low)
-            gradient.setColorAt(0.5, self._color_mid)
-            gradient.setColorAt(1.0, self._color_high)
+            # Синий → Жёлтый → Красный
+            gradient.setColorAt(0.0, QColor(Colors.ACCENT))
+            gradient.setColorAt(0.6, QColor(Colors.WARNING))
+            gradient.setColorAt(1.0, QColor(Colors.DANGER))
             
-            # Заполняем по уровню
+            # Заполнение по уровню
             if self._orientation == Qt.Orientation.Horizontal:
                 fill_width = int(rect.width() * self._level)
                 fill_rect = rect.adjusted(0, 0, -(rect.width() - fill_width), 0)
@@ -114,205 +138,135 @@ if PYQT6_AVAILABLE:
                 fill_height = int(rect.height() * self._level)
                 fill_rect = rect.adjusted(0, rect.height() - fill_height, 0, 0)
             
-            painter.fillRect(fill_rect, QBrush(gradient))
-            
-            # Пиковая метка
-            if self._peak > 0.01:
-                painter.setPen(QPen(Qt.GlobalColor.white, 2))
-                if self._orientation == Qt.Orientation.Horizontal:
-                    peak_x = int(rect.width() * self._peak)
-                    painter.drawLine(peak_x, rect.top(), peak_x, rect.bottom())
-                else:
-                    peak_y = int(rect.height() * (1 - self._peak))
-                    painter.drawLine(rect.left(), peak_y, rect.right(), peak_y)
-            
-            # Рамка
-            painter.setPen(QPen(self._border_color, 1))
-            painter.drawRoundedRect(rect, 3, 3)
-    
-    
+            painter.setBrush(QBrush(gradient))
+            painter.drawRoundedRect(fill_rect, 2, 2)
+
+
     class TranscriptionWidget(QFrame):
         """
-        Виджет отображения транскрипции.
+        Виджет транскрипции — минимальный дизайн.
         
-        Показывает:
-        - Текущий распознаваемый текст (с подсветкой)
-        - История сегментов с временными метками
+        Чистый текстовый вывод без лишних украшений.
         """
         
-        textCopied = pyqtSignal(str)  # Сигнал при копировании текста
+        textCopied = pyqtSignal(str)
         
         def __init__(self, parent=None, show_timestamps=True):
             super().__init__(parent)
             self.show_timestamps = show_timestamps
-            self.segments: List[Tuple[str, str]] = []  # (timestamp, text)
+            self.segments: List[Tuple[str, str]] = []
             
             self._setup_ui()
             self._apply_style()
         
         def _setup_ui(self):
             layout = QVBoxLayout(self)
-            layout.setContentsMargins(8, 8, 8, 8)
-            layout.setSpacing(8)
+            layout.setContentsMargins(16, 16, 16, 16)
+            layout.setSpacing(12)
             
-            # Текущий текст (большой, выделенный)
-            self.current_label = QLabel("Ожидание речи...")
+            # Текущий текст
+            self.current_label = QLabel("")
             self.current_label.setObjectName("currentText")
             self.current_label.setWordWrap(True)
-            self.current_label.setMinimumHeight(60)
+            self.current_label.setMinimumHeight(48)
             self.current_label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
             layout.addWidget(self.current_label)
             
-            # Разделитель
-            separator = QFrame()
-            separator.setFrameShape(QFrame.Shape.HLine)
-            separator.setObjectName("separator")
-            layout.addWidget(separator)
-            
-            # История (прокручиваемая)
+            # История
             self.history_text = QTextEdit()
             self.history_text.setObjectName("historyText")
             self.history_text.setReadOnly(True)
-            self.history_text.setMinimumHeight(100)
+            self.history_text.setMinimumHeight(120)
+            self.history_text.setPlaceholderText("Здесь появится распознанный текст...")
             layout.addWidget(self.history_text, stretch=1)
-            
-            # Кнопки
-            btn_layout = QHBoxLayout()
-            
-            self.copy_btn = QPushButton("📋 Копировать")
-            self.copy_btn.setObjectName("copyBtn")
-            self.copy_btn.clicked.connect(self._on_copy)
-            btn_layout.addWidget(self.copy_btn)
-            
-            self.clear_btn = QPushButton("🗑️ Очистить")
-            self.clear_btn.setObjectName("clearBtn")
-            self.clear_btn.clicked.connect(self.clear)
-            btn_layout.addWidget(self.clear_btn)
-            
-            btn_layout.addStretch()
-            layout.addLayout(btn_layout)
         
         def _apply_style(self):
-            self.setStyleSheet("""
-                TranscriptionWidget {
-                    background-color: #1e1e1e;
-                    border: 1px solid #3d3d3d;
-                    border-radius: 8px;
-                }
-                
-                #currentText {
-                    color: #00d9ff;
-                    font-size: 18px;
-                    font-weight: bold;
-                    padding: 8px;
-                    background-color: #252525;
+            self.setStyleSheet(f"""
+                TranscriptionWidget {{
+                    background-color: {Colors.BG_PRIMARY};
+                    border: 1px solid {Colors.BORDER};
                     border-radius: 4px;
-                }
+                }}
                 
-                #separator {
-                    background-color: #3d3d3d;
-                }
-                
-                #historyText {
-                    color: #cccccc;
-                    font-size: 14px;
-                    background-color: #1a1a1a;
-                    border: none;
+                #currentText {{
+                    color: {Colors.TEXT_PRIMARY};
+                    font-size: 15px;
+                    font-weight: 500;
+                    padding: 12px;
+                    background-color: {Colors.BG_SECONDARY};
                     border-radius: 4px;
-                    padding: 8px;
-                }
+                    border: 1px solid {Colors.BORDER_SUBTLE};
+                }}
                 
-                QPushButton {
-                    background-color: #3d3d3d;
-                    color: white;
-                    border: none;
-                    border-radius: 4px;
-                    padding: 8px 16px;
+                #historyText {{
+                    color: {Colors.TEXT_SECONDARY};
                     font-size: 13px;
-                }
-                
-                QPushButton:hover {
-                    background-color: #4d4d4d;
-                }
-                
-                QPushButton:pressed {
-                    background-color: #2d2d2d;
-                }
+                    background-color: {Colors.BG_DARK};
+                    border: none;
+                    border-radius: 4px;
+                    padding: 12px;
+                    selection-background-color: {Colors.ACCENT};
+                }}
             """)
         
         def set_current_text(self, text: str, highlight: bool = True):
-            """Устанавливает текущий распознаваемый текст."""
-            if highlight and text:
+            if text:
                 self.current_label.setText(text)
-                self.current_label.setStyleSheet("""
-                    color: #00d9ff;
-                    font-size: 18px;
-                    font-weight: bold;
-                    padding: 8px;
-                    background-color: #252525;
-                    border-radius: 4px;
-                """)
-            elif text:
-                self.current_label.setText(text)
+                if highlight:
+                    self.current_label.setStyleSheet(f"""
+                        color: {Colors.TEXT_PRIMARY};
+                        font-size: 15px;
+                        font-weight: 500;
+                        padding: 12px;
+                        background-color: {Colors.BG_SECONDARY};
+                        border-radius: 4px;
+                        border-left: 3px solid {Colors.ACCENT};
+                    """)
             else:
-                self.current_label.setText("Ожидание речи...")
-                self.current_label.setStyleSheet("""
-                    color: #666666;
-                    font-size: 18px;
+                self.current_label.setText("")
+                self.current_label.setStyleSheet(f"""
+                    color: {Colors.TEXT_MUTED};
+                    font-size: 15px;
                     font-style: italic;
-                    padding: 8px;
-                    background-color: #252525;
+                    padding: 12px;
+                    background-color: {Colors.BG_SECONDARY};
                     border-radius: 4px;
                 """)
         
         def add_segment(self, text: str, timestamp: Optional[str] = None):
-            """Добавляет завершённый сегмент в историю."""
             if timestamp is None:
                 timestamp = datetime.now().strftime("%H:%M:%S")
             
             self.segments.append((timestamp, text))
             
-            # Добавляем в историю
             if self.show_timestamps:
-                line = f"<span style='color: #666666;'>[{timestamp}]</span> {text}"
+                line = f"<span style='color: {Colors.TEXT_MUTED};'>[{timestamp}]</span>  {text}"
             else:
                 line = text
             
             self.history_text.append(line)
             
-            # Прокручиваем вниз
             scrollbar = self.history_text.verticalScrollBar()
             scrollbar.setValue(scrollbar.maximum())
         
         def get_full_text(self) -> str:
-            """Возвращает весь накопленный текст."""
             return " ".join(text for _, text in self.segments)
         
         def clear(self):
-            """Очищает историю."""
             self.segments.clear()
             self.history_text.clear()
             self.set_current_text("")
-        
-        def _on_copy(self):
-            """Копирует текст в буфер обмена."""
-            full_text = self.get_full_text()
-            if full_text:
-                from PyQt6.QtWidgets import QApplication
-                clipboard = QApplication.clipboard()
-                clipboard.setText(full_text)
-                self.textCopied.emit(full_text)
-    
-    
+
+
     class StatusIndicator(QWidget):
         """
-        Индикатор статуса (точка с цветом).
+        Простой индикатор статуса — маленький круг.
         """
         
         def __init__(self, parent=None):
             super().__init__(parent)
-            self.setFixedSize(16, 16)
-            self._color = QColor(100, 100, 100)  # Серый (idle)
+            self.setFixedSize(10, 10)
+            self._color = QColor(Colors.TEXT_MUTED)
             self._pulsing = False
             self._pulse_opacity = 1.0
             
@@ -321,36 +275,27 @@ if PYQT6_AVAILABLE:
             self._pulse_direction = -1
         
         def set_status(self, status: str):
-            """
-            Устанавливает статус:
-            - 'idle': серый
-            - 'ready': зелёный
-            - 'recording': красный (пульсирует)
-            - 'paused': жёлтый
-            - 'error': оранжевый
-            """
             self._pulsing = False
             self._pulse_timer.stop()
             
             if status == 'idle':
-                self._color = QColor(100, 100, 100)
+                self._color = QColor(Colors.TEXT_MUTED)
             elif status == 'ready':
-                self._color = QColor(76, 175, 80)  # Зелёный
+                self._color = QColor(Colors.SUCCESS)
             elif status == 'recording':
-                self._color = QColor(244, 67, 54)  # Красный
+                self._color = QColor(Colors.RECORDING)
                 self._pulsing = True
                 self._pulse_timer.start(50)
             elif status == 'paused':
-                self._color = QColor(255, 193, 7)  # Жёлтый
+                self._color = QColor(Colors.WARNING)
             elif status == 'error':
-                self._color = QColor(255, 152, 0)  # Оранжевый
+                self._color = QColor(Colors.DANGER)
             
             self.update()
         
         def _update_pulse(self):
-            """Обновляет пульсацию."""
-            self._pulse_opacity += 0.05 * self._pulse_direction
-            if self._pulse_opacity <= 0.3:
+            self._pulse_opacity += 0.08 * self._pulse_direction
+            if self._pulse_opacity <= 0.4:
                 self._pulse_direction = 1
             elif self._pulse_opacity >= 1.0:
                 self._pulse_direction = -1
@@ -364,92 +309,83 @@ if PYQT6_AVAILABLE:
             if self._pulsing:
                 color.setAlphaF(self._pulse_opacity)
             
-            # Внешний круг (тень)
             painter.setPen(Qt.PenStyle.NoPen)
-            shadow = QColor(0, 0, 0, 50)
-            painter.setBrush(shadow)
-            painter.drawEllipse(2, 2, 12, 12)
-            
-            # Основной круг
             painter.setBrush(color)
-            painter.drawEllipse(1, 1, 12, 12)
-            
-            # Блик
-            highlight = QColor(255, 255, 255, 80)
-            painter.setBrush(highlight)
-            painter.drawEllipse(3, 3, 4, 4)
-    
-    
+            painter.drawEllipse(0, 0, 10, 10)
+
+
     class DeviceComboBox(QComboBox):
         """
-        Выпадающий список аудиоустройств.
+        Выпадающий список устройств — чистый дизайн.
         """
         
-        deviceChanged = pyqtSignal(int, str)  # (device_id, device_name)
+        deviceChanged = pyqtSignal(int, str)
         
         def __init__(self, parent=None):
             super().__init__(parent)
-            self.devices: List[Tuple[int, str, int]] = []  # (id, name, channels)
+            self.devices: List[Tuple[int, str, int]] = []
             
             self._apply_style()
             self.currentIndexChanged.connect(self._on_index_changed)
         
         def _apply_style(self):
-            self.setStyleSheet("""
-                DeviceComboBox {
-                    background-color: #2d2d2d;
-                    color: white;
-                    border: 1px solid #3d3d3d;
+            self.setStyleSheet(f"""
+                DeviceComboBox {{
+                    background-color: {Colors.BG_ELEVATED};
+                    color: {Colors.TEXT_PRIMARY};
+                    border: 1px solid {Colors.BORDER};
                     border-radius: 4px;
-                    padding: 8px;
-                    font-size: 14px;
+                    padding: 10px 12px;
+                    font-size: 13px;
                     min-width: 300px;
-                }
+                }}
                 
-                DeviceComboBox:hover {
-                    border-color: #00d9ff;
-                }
+                DeviceComboBox:hover {{
+                    border-color: {Colors.ACCENT};
+                }}
                 
-                DeviceComboBox::drop-down {
+                DeviceComboBox:focus {{
+                    border-color: {Colors.ACCENT};
+                    outline: none;
+                }}
+                
+                DeviceComboBox::drop-down {{
                     border: none;
-                    width: 30px;
-                }
+                    width: 24px;
+                }}
                 
-                DeviceComboBox QAbstractItemView {
-                    background-color: #2d2d2d;
-                    color: white;
-                    selection-background-color: #00d9ff;
-                    selection-color: black;
-                    border: 1px solid #3d3d3d;
-                }
+                DeviceComboBox::down-arrow {{
+                    width: 0;
+                    height: 0;
+                    border-left: 5px solid transparent;
+                    border-right: 5px solid transparent;
+                    border-top: 5px solid {Colors.TEXT_SECONDARY};
+                }}
+                
+                DeviceComboBox QAbstractItemView {{
+                    background-color: {Colors.BG_ELEVATED};
+                    color: {Colors.TEXT_PRIMARY};
+                    selection-background-color: {Colors.ACCENT};
+                    selection-color: white;
+                    border: 1px solid {Colors.BORDER};
+                    padding: 4px;
+                }}
             """)
         
         def set_devices(self, devices: List[Tuple[int, str, int]]):
-            """Заполняет список устройств."""
             self.devices = devices
             self.clear()
             
             for idx, name, channels in devices:
-                # Определяем тип устройства
-                name_lower = name.lower()
-                loopback_keywords = ['loopback', 'stereo mix', 'what u hear', 'wave out']
-                
-                if any(kw in name_lower for kw in loopback_keywords):
-                    prefix = "🔄 "
-                else:
-                    prefix = "🎤 "
-                
-                display_name = f"{prefix}{name} ({channels}ch)"
+                display_name = f"{name} ({channels}ch)"
                 self.addItem(display_name, userData=idx)
         
         def get_selected_device_id(self) -> Optional[int]:
-            """Возвращает ID выбранного устройства."""
             if self.currentIndex() >= 0:
                 return self.currentData()
             return None
         
         def select_device_by_id(self, device_id: int) -> bool:
-            """Выбирает устройство по ID."""
             for i in range(self.count()):
                 if self.itemData(i) == device_id:
                     self.setCurrentIndex(i)
@@ -461,11 +397,11 @@ if PYQT6_AVAILABLE:
                 device_id = self.currentData()
                 device_name = self.devices[index][1] if index < len(self.devices) else ""
                 self.deviceChanged.emit(device_id, device_name)
-    
-    
+
+
     class RecordButton(QPushButton):
         """
-        Кнопка записи с визуальными эффектами.
+        Кнопка записи — строгий минимальный стиль.
         """
         
         recordingStarted = pyqtSignal()
@@ -474,67 +410,96 @@ if PYQT6_AVAILABLE:
         def __init__(self, parent=None):
             super().__init__(parent)
             self._is_recording = False
-            self.setText("🎙 Записывать")
+            self.setText("Начать запись")
             self.setCheckable(True)
             
             self._apply_style()
             self.clicked.connect(self._on_clicked)
         
         def _apply_style(self):
-            self.setStyleSheet("""
-                RecordButton {
-                    background-color: #4CAF50;
+            self.setStyleSheet(f"""
+                RecordButton {{
+                    background-color: {Colors.ACCENT};
                     color: white;
                     border: none;
-                    border-radius: 24px;
-                    padding: 12px 32px;
-                    font-size: 16px;
-                    font-weight: bold;
-                    min-width: 160px;
-                    min-height: 48px;
-                }
+                    border-radius: 4px;
+                    padding: 12px 24px;
+                    font-size: 13px;
+                    font-weight: 600;
+                    min-width: 140px;
+                    min-height: 40px;
+                }}
                 
-                RecordButton:hover {
-                    background-color: #45a049;
-                }
+                RecordButton:hover {{
+                    background-color: {Colors.ACCENT_HOVER};
+                }}
                 
-                RecordButton:pressed {
-                    background-color: #3d8b40;
-                }
+                RecordButton:pressed {{
+                    background-color: {Colors.ACCENT_ACTIVE};
+                }}
                 
-                RecordButton:checked {
-                    background-color: #f44336;
-                }
+                RecordButton:checked {{
+                    background-color: {Colors.RECORDING};
+                }}
                 
-                RecordButton:checked:hover {
-                    background-color: #da190b;
-                }
+                RecordButton:checked:hover {{
+                    background-color: #b91c1c;
+                }}
             """)
         
         def _on_clicked(self, checked: bool):
             self._is_recording = checked
             if checked:
-                self.setText("⏹ Остановить")
+                self.setText("Остановить")
                 self.recordingStarted.emit()
             else:
-                self.setText("🎙 Записывать")
+                self.setText("Начать запись")
                 self.recordingStopped.emit()
         
         def set_recording(self, recording: bool):
-            """Программно устанавливает состояние записи."""
             if recording != self._is_recording:
                 self._is_recording = recording
                 self.setChecked(recording)
-                if recording:
-                    self.setText("⏹ Остановить")
-                else:
-                    self.setText("🎙 Записывать")
+                self.setText("Остановить" if recording else "Начать запись")
         
         def is_recording(self) -> bool:
             return self._is_recording
 
+
+    class ActionButton(QPushButton):
+        """
+        Вторичная кнопка действия.
+        """
+        
+        def __init__(self, text: str, parent=None):
+            super().__init__(text, parent)
+            self._apply_style()
+        
+        def _apply_style(self):
+            self.setStyleSheet(f"""
+                ActionButton {{
+                    background-color: {Colors.BG_SURFACE};
+                    color: {Colors.TEXT_PRIMARY};
+                    border: 1px solid {Colors.BORDER};
+                    border-radius: 4px;
+                    padding: 10px 20px;
+                    font-size: 13px;
+                    min-height: 36px;
+                }}
+                
+                ActionButton:hover {{
+                    background-color: {Colors.BG_ELEVATED};
+                    border-color: {Colors.ACCENT};
+                }}
+                
+                ActionButton:pressed {{
+                    background-color: {Colors.BG_SECONDARY};
+                }}
+            """)
+
+
 else:
-    # Заглушки если PyQt6 не установлен
+    # Заглушки
     class VUMeter:
         pass
     
@@ -548,4 +513,10 @@ else:
         pass
     
     class RecordButton:
+        pass
+    
+    class ActionButton:
+        pass
+
+    class Colors:
         pass
