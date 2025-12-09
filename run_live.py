@@ -19,9 +19,11 @@ GigaAM Realtime Speech Recognition
 """
 
 import argparse
+import json
 import sys
 import threading
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 # Keyboard для push-to-talk
@@ -56,6 +58,26 @@ from src.audio_devices import (
 from src.realtime_asr import RealtimeASR
 
 
+# Путь к конфигу
+CONFIG_PATH = Path(__file__).parent / "config.json"
+
+
+def load_config() -> dict:
+    """
+    Загружает конфигурацию из config.json.
+    
+    Returns:
+        dict с настройками или пустой dict если файл не найден
+    """
+    if CONFIG_PATH.exists():
+        try:
+            with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
 def copy_to_clipboard(text: str) -> bool:
     """
     Копирует текст в буфер обмена.
@@ -87,6 +109,36 @@ def copy_to_clipboard(text: str) -> bool:
         pass
     
     return False
+
+
+def run_codex_query(query: str) -> bool:
+    """
+    Запускает codex с указанным запросом в отдельном окне PowerShell.
+    
+    Args:
+        query: Текст запроса для codex
+        
+    Returns:
+        True если успешно запущен, False если ошибка
+    """
+    if not query or not query.strip():
+        return False
+    
+    try:
+        import subprocess
+        
+        # Экранируем кавычки для PowerShell
+        safe_query = query.replace('"', '`"').replace("'", "''")
+        
+        # Запускаем в новом окне PowerShell
+        subprocess.Popen(
+            ['powershell', '-NoExit', '-Command', f'codex "{safe_query}"'],
+            creationflags=subprocess.CREATE_NEW_CONSOLE
+        )
+        
+        return True
+    except Exception as e:
+        return False
 
 
 def parse_device_arg(device_arg: str) -> int:
@@ -244,7 +296,7 @@ def run_continuous_mode_simple(asr: RealtimeASR, device_id, output_file, accumul
         pass
 
 
-def run_push_to_talk_mode(asr: RealtimeASR, device_id, output_file, ptt_key: str, ui):
+def run_push_to_talk_mode(asr: RealtimeASR, device_id, output_file, ptt_key: str, ui, codex_enabled: bool = True):
     """Запуск в режиме push-to-talk."""
     if not KEYBOARD_AVAILABLE:
         ui.print_error("Для режима push-to-talk требуется библиотека 'keyboard'")
@@ -308,8 +360,16 @@ def run_push_to_talk_mode(asr: RealtimeASR, device_id, output_file, ptt_key: str
                     # Копируем в буфер обмена
                     copied = copy_to_clipboard(text)
                     
+                    # Запускаем codex с распознанным текстом (если включено)
+                    codex_launched = run_codex_query(text) if codex_enabled else False
+                    
                     # Обновляем текст в UI вместо перезапуска Live (без мерцания)
-                    status_text = f"📋 Скопировано!" if copied else ""
+                    if codex_launched:
+                        status_text = "📋 Скопировано! 🚀 Codex запущен!"
+                    elif copied:
+                        status_text = "📋 Скопировано!"
+                    else:
+                        status_text = ""
                     ui.update(text=f"{text} {status_text}", recording=False)
                     
                     # Записываем в файл
@@ -445,6 +505,36 @@ def main():
     
     args = parser.parse_args()
     
+    # Загружаем конфиг и применяем значения (CLI args имеют приоритет)
+    config = load_config()
+    
+    # Применяем значения из конфига если не заданы через CLI
+    if args.device is None and config.get('device'):
+        args.device = config['device']
+    if not args.loopback and config.get('loopback'):
+        args.loopback = True
+    if not args.interactive and config.get('interactive'):
+        args.interactive = True
+    if not args.push_to_talk and config.get('push_to_talk'):
+        args.push_to_talk = True
+    if args.ptt_key == 'space' and config.get('ptt_key'):
+        args.ptt_key = config['ptt_key']
+    if not args.accumulate and config.get('accumulate'):
+        args.accumulate = True
+    if not args.no_rich and config.get('no_rich'):
+        args.no_rich = True
+    if args.buffer == 3.0 and config.get('buffer'):
+        args.buffer = config['buffer']
+    if args.vad_threshold == 0.0 and config.get('vad_threshold'):
+        args.vad_threshold = config['vad_threshold']
+    if args.model == 'gigaam-v3-e2e-rnnt' and config.get('model'):
+        args.model = config['model']
+    if args.output is None and config.get('output'):
+        args.output = config['output']
+    
+    # Флаг для codex
+    codex_enabled = config.get('codex_enabled', True)
+    
     # Определяем использование Rich
     use_rich = RICH_AVAILABLE and not args.no_rich
     
@@ -572,7 +662,7 @@ def main():
     
     try:
         if args.push_to_talk:
-            run_push_to_talk_mode(asr, device_id, output_file, args.ptt_key, ui)
+            run_push_to_talk_mode(asr, device_id, output_file, args.ptt_key, ui, codex_enabled)
         else:
             if use_rich:
                 run_continuous_mode(asr, device_id, output_file, args.accumulate, ui)
