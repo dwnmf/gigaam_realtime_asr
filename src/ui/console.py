@@ -12,6 +12,8 @@ Rich Console UI для GigaAM
 from datetime import datetime
 from typing import Optional, List, Callable, Tuple
 import threading
+import sys
+import io
 import time
 
 try:
@@ -144,7 +146,16 @@ class RichConsoleUI:
             raise ImportError("Rich library is required. Install: pip install rich")
         
         # Консоль с отключением очистки для уменьшения мерцания
-        self.console = Console(highlight=False, force_terminal=True)
+        stdout = sys.stdout
+        if hasattr(stdout, "buffer"):
+            stdout = io.TextIOWrapper(stdout.buffer, encoding="utf-8", errors="replace", write_through=True)
+        self._console_file = stdout  # сохраняем, чтобы его не сборщило
+        self.console = Console(
+            highlight=False,
+            force_terminal=True,
+            legacy_windows=False,  # форсируем UTF-8 и modern console API
+            file=self._console_file,
+        )
         self.show_timestamps = show_timestamps
         self.show_level = show_level
         
@@ -164,9 +175,8 @@ class RichConsoleUI:
         self._live: Optional[Live] = None
         self._stop_event = threading.Event()
         self._update_thread: Optional[threading.Thread] = None
-        self._pending_update = False  # Флаг для batch-обновлений
         self._last_render = 0.0
-        self._min_render_interval = 0.08  # ~12 FPS, чтобы снизить мерцание
+        self._min_render_interval = 0.08  # ~12 FPS, чтобы сгладить обновления
         
         # Codex panel fields
         self.codex_text = ""
@@ -250,37 +260,14 @@ class RichConsoleUI:
         # Форсируем обновление, если Live запущен
         self._request_render()
 
-    def _flush_pending_update(self):
-        """Выполняет отложенный рендер (используется для троттлинга Live.update)."""
-        if self._stop_event.is_set() or not self._live:
-            self._pending_update = False
-            return
-        self._pending_update = False
-        self._last_render = time.monotonic()
-        self._live.update(self._generate_display())
-
     def _request_render(self):
-        """
-        Запрашивает перерисовку Live с троттлингом, чтобы уменьшить мерцание.
-        Live.update вызывается не чаще, чем раз в _min_render_interval секунд.
-        """
         if not self._live:
             return
-
         now = time.monotonic()
-        elapsed = now - self._last_render
-
-        if elapsed >= self._min_render_interval:
-            self._last_render = now
-            self._live.update(self._generate_display())
+        if now - self._last_render < self._min_render_interval:
             return
-
-        if not self._pending_update:
-            self._pending_update = True
-            delay = max(0.0, self._min_render_interval - elapsed)
-            timer = threading.Timer(delay, self._flush_pending_update)
-            timer.daemon = True
-            timer.start()
+        self._last_render = now
+        self._live.update(self._generate_display())
     
     def _generate_display(self) -> Layout:
         """Генерирует Layout с двумя панелями (ASR слева, Codex справа)."""
@@ -354,12 +341,12 @@ class RichConsoleUI:
     def start_live_display(self):
         """Запускает Live Display."""
         self._stop_event.clear()
-        self._pending_update = False
-        self._last_render = time.monotonic()
+        self._last_render = 0.0
         self._live = Live(
             self._generate_display(),
             console=self.console,
-            refresh_per_second=10,  # Уменьшено для стабильности
+            refresh_per_second=10,
+            auto_refresh=True,
             transient=True,  # Не оставляет след после остановки
             vertical_overflow="visible",  # Предотвращает обрезку
         )
@@ -368,7 +355,6 @@ class RichConsoleUI:
     def stop_live_display(self):
         """Останавливает Live Display."""
         self._stop_event.set()
-        self._pending_update = False
         if self._live:
             self._live.stop()
             self._live = None
