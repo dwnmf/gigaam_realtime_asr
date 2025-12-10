@@ -23,5 +23,11 @@
     "output": null,
     "_output_help": "Путь к файлу для сохранения транскрипции. null = не сохранять",
     "codex_enabled": true,
-    "_codex_enabled_help": "true = запускать codex с распознанным текстом после записи"
+    "_codex_enabled_help": "true = запускать codex с распознанным текстом после записи",
+    "codex_fast_enabled": true,
+    "_codex_fast_enabled_help": "true = запускать быстрый codex (low reasoning) параллельно",
+    "codex_fast_model": "gpt-5.1",
+    "_codex_fast_model_help": "Модель для быстрого Codex",
+    "codex_fast_reasoning": "low",
+    "_codex_fast_reasoning_help": "Уровень reasoning для быстрого Codex: low, medium, high"
 }

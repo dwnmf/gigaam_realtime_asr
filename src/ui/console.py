@@ -183,10 +183,19 @@ class RichConsoleUI:
         self.codex_status = "Ожидание..."
         self.codex_visible = True
         
-        # Codex scrolling
-        self.codex_scroll_offset = 0  # Смещение прокрутки (в строках)
-        self.codex_visible_lines = 15  # Количество видимых строк
-        self._codex_lines_cache = []  # Кэшированные строки текста
+        # Codex scrolling - динамическое определение размера
+        self.codex_scroll_offset = 0
+        self._codex_lines_cache = []
+        
+        # Fast Codex panel fields (low reasoning)
+        self.codex_fast_text = ""
+        self.codex_fast_status = "Ожидание..."
+        self.codex_fast_enabled = True
+        self.codex_fast_scroll_offset = 0
+        self._codex_fast_lines_cache = []
+        
+        # Динамический размер окна
+        self._panel_size_offset = 0  # Смещение размера (можно менять +/-)
     
     def print_banner(self):
         """Выводит приветственный баннер."""
@@ -253,7 +262,7 @@ class RichConsoleUI:
         return bar
     
     def update_codex(self, text: str, status: str = None, append: bool = False):
-        """Обновляет правую панель Codex."""
+        """Обновляет панель Codex (full)."""
         if status:
             self.codex_status = status
         
@@ -271,6 +280,57 @@ class RichConsoleUI:
             self.codex_scroll_offset = max(0, len(self._codex_lines_cache) - self.codex_visible_lines)
             
         # Форсируем обновление, если Live запущен
+        self._request_render()
+    
+    def update_codex_fast(self, text: str, status: str = None, append: bool = False):
+        """Обновляет панель быстрого Codex (low reasoning)."""
+        if status:
+            self.codex_fast_status = status
+        
+        if append:
+            self.codex_fast_text += text
+        else:
+            self.codex_fast_text = text
+            self.codex_fast_scroll_offset = 0
+        
+        # Обновляем кэш строк
+        self._codex_fast_lines_cache = self.codex_fast_text.split('\n') if self.codex_fast_text else []
+        
+        # Автопрокрутка вниз при добавлении текста
+        if append and len(self._codex_fast_lines_cache) > self.codex_fast_visible_lines:
+            self.codex_fast_scroll_offset = max(0, len(self._codex_fast_lines_cache) - self.codex_fast_visible_lines)
+            
+        self._request_render()
+    
+    @property
+    def codex_visible_lines(self) -> int:
+        """Динамическое количество видимых строк для Full Codex на основе высоты терминала."""
+        terminal_height = self.console.height or 30
+        # Базовое количество строк: ~40% высоты терминала для Full Codex
+        base_lines = max(5, int(terminal_height * 0.4))
+        return max(3, base_lines + self._panel_size_offset)
+    
+    @property
+    def codex_fast_visible_lines(self) -> int:
+        """Динамическое количество видимых строк для Fast Codex."""
+        terminal_height = self.console.height or 30
+        # Базовое количество строк: ~25% высоты терминала для Fast Codex
+        base_lines = max(4, int(terminal_height * 0.25))
+        return max(2, base_lines + self._panel_size_offset)
+    
+    def increase_panel_size(self, amount: int = 2):
+        """Увеличить размер панелей Codex."""
+        self._panel_size_offset += amount
+        self._request_render()
+    
+    def decrease_panel_size(self, amount: int = 2):
+        """Уменьшить размер панелей Codex."""
+        self._panel_size_offset = max(-10, self._panel_size_offset - amount)
+        self._request_render()
+    
+    def reset_panel_size(self):
+        """Сбросить размер панелей к значению по умолчанию."""
+        self._panel_size_offset = 0
         self._request_render()
     
     def scroll_codex_up(self, lines: int = 3):
@@ -359,7 +419,7 @@ class RichConsoleUI:
             padding=(0, 1)
         )
 
-        # --- 2. ПРАВАЯ ПАНЕЛЬ (CODEX) со скроллингом ---
+        # --- 2. ПРАВАЯ ПАНЕЛЬ (CODEX full) со скроллингом ---
         if self.codex_text:
             lines = self._codex_lines_cache
             total_lines = len(lines)
@@ -393,7 +453,7 @@ class RichConsoleUI:
         
         scroll_hint = "[dim]↑/↓ прокрутка[/dim]" if len(self._codex_lines_cache) > self.codex_visible_lines else ""
         
-        right_panel = Panel(
+        codex_full_panel = Panel(
             codex_content,
             title=f"[bold magenta]🤖 Codex: {self.codex_status}[/bold magenta]",
             subtitle=scroll_hint,
@@ -401,13 +461,53 @@ class RichConsoleUI:
             box=box.ROUNDED,
             padding=(0, 1)
         )
+        
+        # --- 3. ПАНЕЛЬ БЫСТРОГО CODEX (low reasoning) ---
+        if self.codex_fast_enabled:
+            if self.codex_fast_text:
+                fast_lines = self._codex_fast_lines_cache
+                fast_total = len(fast_lines)
+                fast_visible = fast_lines[self.codex_fast_scroll_offset:self.codex_fast_scroll_offset + self.codex_fast_visible_lines]
+                fast_display = '\n'.join(fast_visible)
+                
+                if fast_total > self.codex_fast_visible_lines:
+                    fast_indicator = Text()
+                    fast_indicator.append(fast_display)
+                    fast_indicator.append(f"\n[dim][{self.codex_fast_scroll_offset + 1}-{min(self.codex_fast_scroll_offset + self.codex_fast_visible_lines, fast_total)}/{fast_total}][/dim]")
+                    fast_content = fast_indicator
+                else:
+                    fast_content = fast_display
+            else:
+                fast_content = "[dim]Ожидание...[/dim]"
+            
+            codex_fast_panel = Panel(
+                fast_content,
+                title=f"[bold yellow]⚡ Fast: {self.codex_fast_status}[/bold yellow]",
+                border_style="yellow",
+                box=box.ROUNDED,
+                padding=(0, 1)
+            )
 
-        # --- 3. СБОРКА LAYOUT ---
+        # --- 4. СБОРКА LAYOUT ---
         layout = Layout()
-        layout.split_row(
-            Layout(left_panel, name="left", ratio=1),
-            Layout(right_panel, name="right", ratio=1)
-        )
+        
+        if self.codex_fast_enabled:
+            # Трёхпанельный layout: ASR слева, Fast сверху-справа, Full снизу-справа
+            right_layout = Layout()
+            right_layout.split_column(
+                Layout(codex_fast_panel, name="fast", ratio=2),
+                Layout(codex_full_panel, name="full", ratio=3)
+            )
+            layout.split_row(
+                Layout(left_panel, name="left", ratio=1),
+                Layout(right_layout, name="right", ratio=1)
+            )
+        else:
+            # Двухпанельный layout: ASR слева, Full Codex справа
+            layout.split_row(
+                Layout(left_panel, name="left", ratio=1),
+                Layout(codex_full_panel, name="right", ratio=1)
+            )
         
         return layout
     

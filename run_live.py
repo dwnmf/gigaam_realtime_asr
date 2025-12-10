@@ -154,6 +154,56 @@ def run_codex_thread(query: str, ui):
         ui.update_codex(f"\nОшибка: {e}", status="Ошибка", append=True)
 
 
+def run_codex_fast_thread(query: str, ui, model: str = "gpt-5.1", reasoning: str = "low"):
+    """Фоновая функция для выполнения быстрого Codex (low reasoning) и обновления UI."""
+    import subprocess
+    import shutil
+    import time
+    
+    ui.update_codex_fast("", status="⚡ Генерация...", append=False)
+    ui.update_codex_fast(f"> {query}\n\n", append=True)
+    
+    try:
+        codex_path = shutil.which("codex")
+        if not codex_path:
+            ui.update_codex_fast("\nCodex CLI не найден в PATH.", status="Ошибка", append=True)
+            return
+
+        # Используем codex exec как в основном потоке
+        # Формат: codex exec --model gpt-5.1 --config model_reasoning_effort="low" "query"
+        cmd = [
+            codex_path, 
+            "exec",
+            "--model", model,
+            "--config", f'model_reasoning_effort="{reasoning}"',
+            query
+        ]
+        
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace"
+        )
+
+        # Читаем вывод построчно
+        if process.stdout:
+            for line in process.stdout:
+                ui.update_codex_fast(line, append=True)
+                time.sleep(0.03)
+
+        retcode = process.wait()
+        if retcode != 0:
+            ui.update_codex_fast(f"\nКод выхода: {retcode}", status="Ошибка", append=True)
+        else:
+            ui.update_codex_fast("", status="✓ Готово", append=True)
+
+    except Exception as e:
+        ui.update_codex_fast(f"\nОшибка: {e}", status="Ошибка", append=True)
+
+
 def run_codex_query(query: str, ui=None) -> bool:
     """
     Запускает codex с указанным запросом внутри UI (в отдельном потоке).
@@ -183,6 +233,36 @@ def run_codex_query(query: str, ui=None) -> bool:
     
     # Запускаем в отдельном потоке, чтобы не блокировать аудио
     t = threading.Thread(target=run_codex_thread, args=(query, ui), daemon=True)
+    t.start()
+    
+    return True
+
+
+def run_codex_fast_query(query: str, ui, model: str = "gpt-5.1", reasoning: str = "low") -> bool:
+    """
+    Запускает быстрый codex (low reasoning) с указанным запросом.
+    
+    Args:
+        query: Текст запроса для codex
+        ui: Объект UI с методом update_codex_fast
+        model: Модель для быстрого Codex (по умолчанию gpt-5.1)
+        reasoning: Уровень reasoning (low/medium/high)
+        
+    Returns:
+        True если успешно запущен, False если ошибка
+    """
+    if not query or not query.strip():
+        return False
+    
+    if ui is None or not hasattr(ui, 'update_codex_fast'):
+        return False
+    
+    # Запускаем в отдельном потоке
+    t = threading.Thread(
+        target=run_codex_fast_thread, 
+        args=(query, ui, model, reasoning), 
+        daemon=True
+    )
     t.start()
     
     return True
@@ -343,16 +423,32 @@ def run_continuous_mode_simple(asr: RealtimeASR, device_id, output_file, accumul
         pass
 
 
-def run_push_to_talk_mode(asr: RealtimeASR, device_id, output_file, ptt_key: str, ui, codex_enabled: bool = True):
+def run_push_to_talk_mode(
+    asr: RealtimeASR, 
+    device_id, 
+    output_file, 
+    ptt_key: str, 
+    ui, 
+    codex_enabled: bool = True,
+    codex_fast_enabled: bool = True,
+    codex_fast_model: str = "gpt-5.1",
+    codex_fast_reasoning: str = "low"
+):
     """Запуск в режиме push-to-talk."""
     if not KEYBOARD_AVAILABLE:
         ui.print_error("Для режима push-to-talk требуется библиотека 'keyboard'")
         ui.print_info("Установите: pip install keyboard")
         return
     
+    # Устанавливаем флаг fast codex в UI
+    ui.codex_fast_enabled = codex_fast_enabled
+    
     ui.print_info(f"Режим Push-to-Talk активен!")
     ui.print_info(f"Удерживайте [{ptt_key.upper()}] для записи")
     ui.print_info(f"Отпустите для распознавания + копирования в буфер обмена")
+    if codex_fast_enabled:
+        ui.print_info(f"⚡ Fast Codex ({codex_fast_model}, {codex_fast_reasoning}) включён")
+    ui.print_info(f"↑/↓ прокрутка • +/- размер панелей • 0 сброс")
     ui.print_info(f"Нажмите [ESC] для выхода\n")
     
     # Состояние
@@ -398,6 +494,17 @@ def run_push_to_talk_mode(asr: RealtimeASR, device_id, output_file, ptt_key: str
                 ui.scroll_codex_to_bottom()
                 threading.Event().wait(0.15)
             
+            # Изменение размера панелей (+/- или =/-)
+            elif keyboard.is_pressed('+') or keyboard.is_pressed('='):
+                ui.increase_panel_size(2)
+                threading.Event().wait(0.2)
+            elif keyboard.is_pressed('-'):
+                ui.decrease_panel_size(2)
+                threading.Event().wait(0.2)
+            elif keyboard.is_pressed('0'):
+                ui.reset_panel_size()
+                threading.Event().wait(0.2)
+            
             # Проверяем состояние PTT клавиши
             is_key_pressed = keyboard.is_pressed(key_name)
             
@@ -427,11 +534,20 @@ def run_push_to_talk_mode(asr: RealtimeASR, device_id, output_file, ptt_key: str
                     # Копируем в буфер обмена
                     copied = copy_to_clipboard(text)
                     
-                    # Запускаем codex с распознанным текстом (если включено)
+                    # Запускаем быстрый codex (если включено)
+                    fast_launched = False
+                    if codex_fast_enabled:
+                        fast_launched = run_codex_fast_query(
+                            text, ui, 
+                            model=codex_fast_model, 
+                            reasoning=codex_fast_reasoning
+                        )
+                    
+                    # Запускаем полный codex (если включено)
                     codex_launched = run_codex_query(text, ui) if codex_enabled else False
                     
                     # Обновляем текст в UI вместо перезапуска Live (без мерцания)
-                    if codex_launched:
+                    if codex_launched or fast_launched:
                         status_text = "📋 Скопировано! 🚀 Codex запущен!"
                     elif copied:
                         status_text = "📋 Скопировано!"
@@ -602,6 +718,11 @@ def main():
     # Флаг для codex
     codex_enabled = config.get('codex_enabled', True)
     
+    # Настройки Fast Codex
+    codex_fast_enabled = config.get('codex_fast_enabled', True)
+    codex_fast_model = config.get('codex_fast_model', 'gpt-5.1')
+    codex_fast_reasoning = config.get('codex_fast_reasoning', 'low')
+    
     # Определяем использование Rich
     use_rich = RICH_AVAILABLE and not args.no_rich
     
@@ -729,7 +850,13 @@ def main():
     
     try:
         if args.push_to_talk:
-            run_push_to_talk_mode(asr, device_id, output_file, args.ptt_key, ui, codex_enabled)
+            run_push_to_talk_mode(
+                asr, device_id, output_file, args.ptt_key, ui, 
+                codex_enabled=codex_enabled,
+                codex_fast_enabled=codex_fast_enabled,
+                codex_fast_model=codex_fast_model,
+                codex_fast_reasoning=codex_fast_reasoning
+            )
         else:
             if use_rich:
                 run_continuous_mode(asr, device_id, output_file, args.accumulate, ui)
