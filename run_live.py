@@ -378,6 +378,26 @@ def run_push_to_talk_mode(asr: RealtimeASR, device_id, output_file, ptt_key: str
             if keyboard.is_pressed('esc'):
                 break
             
+            # Прокрутка панели Codex стрелками
+            if keyboard.is_pressed('up'):
+                ui.scroll_codex_up(3)
+                threading.Event().wait(0.15)  # Debounce
+            elif keyboard.is_pressed('down'):
+                ui.scroll_codex_down(3)
+                threading.Event().wait(0.15)
+            elif keyboard.is_pressed('page up'):
+                ui.scroll_codex_up(10)
+                threading.Event().wait(0.15)
+            elif keyboard.is_pressed('page down'):
+                ui.scroll_codex_down(10)
+                threading.Event().wait(0.15)
+            elif keyboard.is_pressed('home'):
+                ui.scroll_codex_to_top()
+                threading.Event().wait(0.15)
+            elif keyboard.is_pressed('end'):
+                ui.scroll_codex_to_bottom()
+                threading.Event().wait(0.15)
+            
             # Проверяем состояние PTT клавиши
             is_key_pressed = keyboard.is_pressed(key_name)
             

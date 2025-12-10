@@ -182,6 +182,11 @@ class RichConsoleUI:
         self.codex_text = ""
         self.codex_status = "Ожидание..."
         self.codex_visible = True
+        
+        # Codex scrolling
+        self.codex_scroll_offset = 0  # Смещение прокрутки (в строках)
+        self.codex_visible_lines = 15  # Количество видимых строк
+        self._codex_lines_cache = []  # Кэшированные строки текста
     
     def print_banner(self):
         """Выводит приветственный баннер."""
@@ -256,9 +261,43 @@ class RichConsoleUI:
             self.codex_text += text
         else:
             self.codex_text = text
+            self.codex_scroll_offset = 0  # Сброс прокрутки при новом тексте
+        
+        # Обновляем кэш строк
+        self._codex_lines_cache = self.codex_text.split('\n') if self.codex_text else []
+        
+        # Автопрокрутка вниз при добавлении текста
+        if append and len(self._codex_lines_cache) > self.codex_visible_lines:
+            self.codex_scroll_offset = max(0, len(self._codex_lines_cache) - self.codex_visible_lines)
             
         # Форсируем обновление, если Live запущен
         self._request_render()
+    
+    def scroll_codex_up(self, lines: int = 3):
+        """Прокрутка ответа Codex вверх."""
+        if self.codex_scroll_offset > 0:
+            self.codex_scroll_offset = max(0, self.codex_scroll_offset - lines)
+            self._request_render()
+    
+    def scroll_codex_down(self, lines: int = 3):
+        """Прокрутка ответа Codex вниз."""
+        max_offset = max(0, len(self._codex_lines_cache) - self.codex_visible_lines)
+        if self.codex_scroll_offset < max_offset:
+            self.codex_scroll_offset = min(max_offset, self.codex_scroll_offset + lines)
+            self._request_render()
+    
+    def scroll_codex_to_top(self):
+        """Прокрутка в начало."""
+        if self.codex_scroll_offset != 0:
+            self.codex_scroll_offset = 0
+            self._request_render()
+    
+    def scroll_codex_to_bottom(self):
+        """Прокрутка в конец."""
+        max_offset = max(0, len(self._codex_lines_cache) - self.codex_visible_lines)
+        if self.codex_scroll_offset != max_offset:
+            self.codex_scroll_offset = max_offset
+            self._request_render()
 
     def _request_render(self):
         if not self._live:
@@ -320,10 +359,44 @@ class RichConsoleUI:
             padding=(0, 1)
         )
 
-        # --- 2. ПРАВАЯ ПАНЕЛЬ (CODEX) ---
+        # --- 2. ПРАВАЯ ПАНЕЛЬ (CODEX) со скроллингом ---
+        if self.codex_text:
+            lines = self._codex_lines_cache
+            total_lines = len(lines)
+            
+            # Получаем видимые строки с учётом смещения
+            visible_lines = lines[self.codex_scroll_offset:self.codex_scroll_offset + self.codex_visible_lines]
+            codex_display = '\n'.join(visible_lines)
+            
+            # Индикатор прокрутки
+            if total_lines > self.codex_visible_lines:
+                can_scroll_up = self.codex_scroll_offset > 0
+                can_scroll_down = self.codex_scroll_offset < total_lines - self.codex_visible_lines
+                
+                scroll_indicator = Text()
+                if can_scroll_up:
+                    scroll_indicator.append("▲ ", style="dim cyan")
+                else:
+                    scroll_indicator.append("  ")
+                scroll_indicator.append(f"[{self.codex_scroll_offset + 1}-{min(self.codex_scroll_offset + self.codex_visible_lines, total_lines)}/{total_lines}]", style="dim")
+                if can_scroll_down:
+                    scroll_indicator.append(" ▼", style="dim cyan")
+                
+                codex_content = Text()
+                codex_content.append(codex_display)
+                codex_content.append("\n\n")
+                codex_content.append_text(scroll_indicator)
+            else:
+                codex_content = codex_display
+        else:
+            codex_content = "[dim]Ожидание запроса...[/dim]"
+        
+        scroll_hint = "[dim]↑/↓ прокрутка[/dim]" if len(self._codex_lines_cache) > self.codex_visible_lines else ""
+        
         right_panel = Panel(
-            self.codex_text if self.codex_text else "[dim]Ожидание запроса...[/dim]",
+            codex_content,
             title=f"[bold magenta]🤖 Codex: {self.codex_status}[/bold magenta]",
+            subtitle=scroll_hint,
             border_style="magenta",
             box=box.ROUNDED,
             padding=(0, 1)
