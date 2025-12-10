@@ -7,6 +7,7 @@ Rich Console UI для GigaAM
 - Динамическое обновление (Live Display)
 - Интерактивный выбор устройств
 - Панели и таблицы
+- Конвертация LaTeX в Unicode
 """
 
 from datetime import datetime
@@ -15,6 +16,7 @@ import threading
 import sys
 import io
 import time
+import re
 
 try:
     from rich.console import Console
@@ -30,6 +32,88 @@ try:
     RICH_AVAILABLE = True
 except ImportError:
     RICH_AVAILABLE = False
+
+# LaTeX to Unicode конвертация
+try:
+    from pylatexenc.latex2text import LatexNodes2Text
+    LATEX_AVAILABLE = True
+    _latex_converter = LatexNodes2Text()
+except ImportError:
+    LATEX_AVAILABLE = False
+    _latex_converter = None
+
+
+def latex_to_unicode(text: str) -> str:
+    """
+    Конвертирует LaTeX-разметку в Unicode символы.
+    
+    Примеры:
+        \\frac{1}{2} → 1/2
+        \\neq → ≠
+        \\alpha → α
+        \\(x^2\\) → x²
+    """
+    if not text:
+        return text
+    
+    if LATEX_AVAILABLE and _latex_converter:
+        try:
+            # Убираем inline math delimiters \(...\) и $...$
+            text = re.sub(r'\\\((.*?)\\\)', r'\1', text)
+            text = re.sub(r'\$([^\$]+)\$', r'\1', text)
+            # Конвертируем LaTeX команды в Unicode
+            text = _latex_converter.latex_to_text(text)
+        except Exception:
+            pass
+    else:
+        # Fallback: простая замена частых символов
+        replacements = {
+            r'\neq': '≠', r'\leq': '≤', r'\geq': '≥',
+            r'\alpha': 'α', r'\beta': 'β', r'\gamma': 'γ', r'\delta': 'δ',
+            r'\pi': 'π', r'\sigma': 'σ', r'\omega': 'ω', r'\theta': 'θ',
+            r'\infty': '∞', r'\sum': '∑', r'\prod': '∏', r'\int': '∫',
+            r'\times': '×', r'\div': '÷', r'\pm': '±', r'\cdot': '·',
+            r'\sqrt': '√', r'\approx': '≈', r'\equiv': '≡',
+            r'\in': '∈', r'\notin': '∉', r'\subset': '⊂', r'\supset': '⊃',
+            r'\cup': '∪', r'\cap': '∩', r'\emptyset': '∅',
+            r'\forall': '∀', r'\exists': '∃', r'\neg': '¬',
+            r'\land': '∧', r'\lor': '∨', r'\rightarrow': '→', r'\leftarrow': '←',
+            r'\Rightarrow': '⇒', r'\Leftarrow': '⇐', r'\leftrightarrow': '↔',
+            r'\partial': '∂', r'\nabla': '∇',
+            r'\det': 'det', r'\log': 'log', r'\ln': 'ln', r'\sin': 'sin', r'\cos': 'cos',
+            r'\(': '', r'\)': '', r'\[': '', r'\]': '',
+            r'\{': '{', r'\}': '}',
+        }
+        for latex, unicode_char in replacements.items():
+            text = text.replace(latex, unicode_char)
+        
+        # Обработка степеней: x^2 → x², x^{10} → x¹⁰
+        superscripts = {'0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', 
+                        '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹',
+                        '+': '⁺', '-': '⁻', 'n': 'ⁿ', 'i': 'ⁱ'}
+        # x^{abc} → x с верхними индексами
+        def replace_superscript(match):
+            exp = match.group(1)
+            return ''.join(superscripts.get(c, c) for c in exp)
+        text = re.sub(r'\^{([^}]+)}', replace_superscript, text)
+        text = re.sub(r'\^([0-9n])', replace_superscript, text)
+        
+        # Обработка индексов: x_i → xᵢ
+        subscripts = {'0': '₀', '1': '₁', '2': '₂', '3': '₃', '4': '₄',
+                      '5': '₅', '6': '₆', '7': '₇', '8': '₈', '9': '₉',
+                      'i': 'ᵢ', 'j': 'ⱼ', 'n': 'ₙ', 'm': 'ₘ'}
+        def replace_subscript(match):
+            sub = match.group(1)
+            return ''.join(subscripts.get(c, c) for c in sub)
+        text = re.sub(r'_{([^}]+)}', replace_subscript, text)
+        text = re.sub(r'_([0-9ijn])', replace_subscript, text)
+        
+        # Дроби: \frac{a}{b} → a/b
+        text = re.sub(r'\\frac{([^}]+)}{([^}]+)}', r'\1/\2', text)
+    
+    return text
+
+
 
 
 # Цветовая схема
@@ -266,11 +350,14 @@ class RichConsoleUI:
         if status:
             self.codex_status = status
         
+        # Конвертируем LaTeX в Unicode
+        text = latex_to_unicode(text)
+        
         if append:
             self.codex_text += text
         else:
             self.codex_text = text
-            self.codex_scroll_offset = 0  # Сброс прокрутки при новом тексте
+            self.codex_scroll_offset = 0
         
         # Обновляем кэш строк
         self._codex_lines_cache = self.codex_text.split('\n') if self.codex_text else []
@@ -286,6 +373,9 @@ class RichConsoleUI:
         """Обновляет панель быстрого Codex (low reasoning)."""
         if status:
             self.codex_fast_status = status
+        
+        # Конвертируем LaTeX в Unicode
+        text = latex_to_unicode(text)
         
         if append:
             self.codex_fast_text += text
