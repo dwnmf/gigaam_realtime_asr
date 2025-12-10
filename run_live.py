@@ -111,12 +111,56 @@ def copy_to_clipboard(text: str) -> bool:
     return False
 
 
-def run_codex_query(query: str) -> bool:
+def run_codex_thread(query: str, ui):
+    """Фоновая функция для выполнения запроса Codex и обновления UI."""
+    import subprocess
+    import shutil
+    import time
+    
+    ui.update_codex("", status="Генерация...", append=False)
+    ui.update_codex(f"> {query}\n\n", append=True)
+    
+    try:
+        codex_path = shutil.which("codex")
+        if not codex_path:
+            ui.update_codex("\nCodex CLI не найден в PATH. Установите codex или добавьте его в PATH.", status="Ошибка", append=True)
+            return
+
+        # Non-interactive режим Codex (`codex exec`) не требует TTY, поэтому убираем
+        # запуск через отдельную консоль и считываем вывод прямо из stdout.
+        process = subprocess.Popen(
+            [codex_path, "exec", "--color=never", query],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace"
+        )
+
+        # Читаем вывод построчно, чтобы сразу отображать прогресс
+        if process.stdout:
+            for line in process.stdout:
+                ui.update_codex(line, append=True)
+                # Небольшая пауза, чтобы не перегружать UI
+                time.sleep(0.05)
+
+        retcode = process.wait()
+        if retcode != 0:
+            ui.update_codex(f"\nCodex завершился с кодом {retcode}", status="Ошибка", append=True)
+        else:
+            ui.update_codex("", status="Готово", append=True)
+
+    except Exception as e:
+        ui.update_codex(f"\nОшибка: {e}", status="Ошибка", append=True)
+
+
+def run_codex_query(query: str, ui=None) -> bool:
     """
-    Запускает codex с указанным запросом в отдельном окне PowerShell.
+    Запускает codex с указанным запросом внутри UI (в отдельном потоке).
     
     Args:
         query: Текст запроса для codex
+        ui: Объект UI с методом update_codex для отображения вывода
         
     Returns:
         True если успешно запущен, False если ошибка
@@ -124,21 +168,24 @@ def run_codex_query(query: str) -> bool:
     if not query or not query.strip():
         return False
     
-    try:
-        import subprocess
-        
-        # Экранируем кавычки для PowerShell
-        safe_query = query.replace('"', '`"').replace("'", "''")
-        
-        # Запускаем в новом окне PowerShell
-        subprocess.Popen(
-            ['powershell', '-NoExit', '-Command', f'codex "{safe_query}"'],
-            creationflags=subprocess.CREATE_NEW_CONSOLE
-        )
-        
-        return True
-    except Exception as e:
-        return False
+    # Если UI не передан, используем старый способ (новое окно)
+    if ui is None:
+        try:
+            import subprocess
+            safe_query = query.replace('"', '`"').replace("'", "''")
+            subprocess.Popen(
+                ['powershell', '-NoExit', '-Command', f'codex "{safe_query}"'],
+                creationflags=subprocess.CREATE_NEW_CONSOLE
+            )
+            return True
+        except Exception:
+            return False
+    
+    # Запускаем в отдельном потоке, чтобы не блокировать аудио
+    t = threading.Thread(target=run_codex_thread, args=(query, ui), daemon=True)
+    t.start()
+    
+    return True
 
 
 def parse_device_arg(device_arg: str) -> int:
@@ -361,7 +408,7 @@ def run_push_to_talk_mode(asr: RealtimeASR, device_id, output_file, ptt_key: str
                     copied = copy_to_clipboard(text)
                     
                     # Запускаем codex с распознанным текстом (если включено)
-                    codex_launched = run_codex_query(text) if codex_enabled else False
+                    codex_launched = run_codex_query(text, ui) if codex_enabled else False
                     
                     # Обновляем текст в UI вместо перезапуска Live (без мерцания)
                     if codex_launched:

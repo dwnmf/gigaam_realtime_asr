@@ -165,6 +165,13 @@ class RichConsoleUI:
         self._stop_event = threading.Event()
         self._update_thread: Optional[threading.Thread] = None
         self._pending_update = False  # Флаг для batch-обновлений
+        self._last_render = 0.0
+        self._min_render_interval = 0.08  # ~12 FPS, чтобы снизить мерцание
+        
+        # Codex panel fields
+        self.codex_text = ""
+        self.codex_status = "Ожидание..."
+        self.codex_visible = True
     
     def print_banner(self):
         """Выводит приветственный баннер."""
@@ -230,68 +237,125 @@ class RichConsoleUI:
         
         return bar
     
-    def _generate_display(self) -> Panel:
-        """Генерирует панель отображения для Live."""
+    def update_codex(self, text: str, status: str = None, append: bool = False):
+        """Обновляет правую панель Codex."""
+        if status:
+            self.codex_status = status
+        
+        if append:
+            self.codex_text += text
+        else:
+            self.codex_text = text
+            
+        # Форсируем обновление, если Live запущен
+        self._request_render()
+
+    def _flush_pending_update(self):
+        """Выполняет отложенный рендер (используется для троттлинга Live.update)."""
+        if self._stop_event.is_set() or not self._live:
+            self._pending_update = False
+            return
+        self._pending_update = False
+        self._last_render = time.monotonic()
+        self._live.update(self._generate_display())
+
+    def _request_render(self):
+        """
+        Запрашивает перерисовку Live с троттлингом, чтобы уменьшить мерцание.
+        Live.update вызывается не чаще, чем раз в _min_render_interval секунд.
+        """
+        if not self._live:
+            return
+
+        now = time.monotonic()
+        elapsed = now - self._last_render
+
+        if elapsed >= self._min_render_interval:
+            self._last_render = now
+            self._live.update(self._generate_display())
+            return
+
+        if not self._pending_update:
+            self._pending_update = True
+            delay = max(0.0, self._min_render_interval - elapsed)
+            timer = threading.Timer(delay, self._flush_pending_update)
+            timer.daemon = True
+            timer.start()
+    
+    def _generate_display(self) -> Layout:
+        """Генерирует Layout с двумя панелями (ASR слева, Codex справа)."""
+        # --- 1. ЛЕВАЯ ПАНЕЛЬ (ASR) ---
         # Статус записи
         if self.is_recording:
-            status = Text("🔴 ЗАПИСЬ", style="bold red")
+            status_text = Text("🔴 ЗАПИСЬ", style="bold red")
         elif self.is_paused:
-            status = Text("⏸️  ПАУЗА", style="bold yellow")
+            status_text = Text("⏸️  ПАУЗА", style="bold yellow")
         else:
-            status = Text("⚪ ГОТОВ", style="bold green")
+            status_text = Text("⚪ ГОТОВ", style="bold green")
         
         # Уровень звука
         level_bar = self._get_level_bar(self.audio_level)
-        level_text = f" {self.audio_level:.2f}"
+        level_info = Text(f" {self.audio_level:.2f}", style="dim")
+        
+        # Сборка контента ASR
+        asr_content = Text()
+        asr_content.append("  ")
+        asr_content.append_text(status_text)
+        asr_content.append("  │  ")
+        asr_content.append_text(level_bar)
+        asr_content.append_text(level_info)
+        asr_content.append("\n\n")
+        
+        # Накопленный текст
+        if self.accumulated_text:
+            asr_content.append(self.accumulated_text, style="dim")
+            asr_content.append("\n")
         
         # Текущий текст
-        display_text = self.current_text if self.current_text else "[dim]Ожидание речи...[/dim]"
-        
-        # Собираем Layout
-        content = Text()
-        
-        # Строка статуса
-        content.append("  ")
-        content.append_text(status)
-        content.append("  │  ")
-        content.append_text(level_bar)
-        content.append(level_text, style="dim")
-        content.append("\n\n")
-        
-        # Текст
-        if self.accumulated_text:
-            content.append("  ", style="dim")
-            content.append(self.accumulated_text, style="dim")
-            content.append("\n")
-        
-        content.append("  ")
+        current_disp = self.current_text if self.current_text else "[dim]Говорите...[/dim]"
         if self.is_recording:
-            content.append(display_text, style="bold white")
+            asr_content.append(current_disp, style="bold white")
         else:
-            content.append(display_text)
-        
-        content.append("\n")
+            asr_content.append(current_disp)
         
         # Подсказки
         if self.mode == "push_to_talk":
             hint = "[dim]Удерживайте [SPACE] для записи • [ESC] выход[/dim]"
         else:
             hint = "[dim]Ctrl+C для выхода[/dim]"
-        
-        panel = Panel(
-            content,
+
+        left_panel = Panel(
+            asr_content,
             title=f"[bold cyan]🎤 {self.device_name}[/bold cyan]",
             subtitle=hint,
             border_style="cyan",
             box=box.ROUNDED,
             padding=(0, 1)
         )
+
+        # --- 2. ПРАВАЯ ПАНЕЛЬ (CODEX) ---
+        right_panel = Panel(
+            self.codex_text if self.codex_text else "[dim]Ожидание запроса...[/dim]",
+            title=f"[bold magenta]🤖 Codex: {self.codex_status}[/bold magenta]",
+            border_style="magenta",
+            box=box.ROUNDED,
+            padding=(0, 1)
+        )
+
+        # --- 3. СБОРКА LAYOUT ---
+        layout = Layout()
+        layout.split_row(
+            Layout(left_panel, name="left", ratio=1),
+            Layout(right_panel, name="right", ratio=1)
+        )
         
-        return panel
+        return layout
     
     def start_live_display(self):
         """Запускает Live Display."""
         self._stop_event.clear()
+        self._pending_update = False
+        self._last_render = time.monotonic()
         self._live = Live(
             self._generate_display(),
             console=self.console,
@@ -304,6 +368,7 @@ class RichConsoleUI:
     def stop_live_display(self):
         """Останавливает Live Display."""
         self._stop_event.set()
+        self._pending_update = False
         if self._live:
             self._live.stop()
             self._live = None
@@ -349,7 +414,7 @@ class RichConsoleUI:
         
         # Обновляем Live только при реальных изменениях
         if self._live and changed:
-            self._live.update(self._generate_display())
+            self._request_render()
     
     def add_segment(self, text: str):
         """Добавляет распознанный сегмент."""
